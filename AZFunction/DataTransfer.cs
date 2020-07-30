@@ -5,11 +5,14 @@ using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
+using MovieDBconnection.PersonDiscoveryJsonTypes;
+using System.Threading.Tasks;
 
 namespace MovieDBconnection
 {
-    public static class InitialTransfer
+    public static class DataTransfer
     {
+        private static AZTableHandler _tableHandler;
         private static RESTHandler _peopleDiscovery;
         private static List<dynamic> _personDiscoveryList;
         private const string PARTKEY = "name";
@@ -20,10 +23,19 @@ namespace MovieDBconnection
         private static CloudTable table;
 
         private static TableBatchOperation batch;
+        private static bool userInTable;
+
+
+        //TODO: need to determine from call to popular people if it is a:
+        //TODO: new person - insert
+        //TODO: update to existing person - update
+        //TODO: person is no longer in pop people list but is in AS table - delete
 
         [FunctionName("GetMovieDBPopularPersons")]
-        public static void Run([TimerTrigger("%timerSchedule%")] TimerInfo myTimer, ILogger log)
+        public static async Task RunAsync([TimerTrigger("%timerSchedule%")] TimerInfo myTimer, ILogger log)
         {
+            log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
+
             var cpBaseUri = System.Environment.GetEnvironmentVariable("BaseURL", EnvironmentVariableTarget.Process);
             var cpAPIKey = System.Environment.GetEnvironmentVariable("MovieDBAPIKey", EnvironmentVariableTarget.Process);
             var cpLang = System.Environment.GetEnvironmentVariable("Lang", EnvironmentVariableTarget.Process);
@@ -35,15 +47,15 @@ namespace MovieDBconnection
             storageAccount = CloudStorageAccount.Parse(connString);
             tableClient = storageAccount.CreateCloudTableClient();
             table = tableClient.GetTableReference("tblPeople");
-            table.CreateIfNotExistsAsync();
+            await table.CreateIfNotExistsAsync();
 
-            log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
-
+            _tableHandler = new AZTableHandler(table);
             _peopleDiscovery = new RESTHandler(cpAPIKey, cpBaseUri, cpLang, cpLIMIT);
             _personDiscoveryList = _peopleDiscovery.ReadObjects();
 
             foreach (JObject jPerson in _personDiscoveryList)
             {
+                userInTable = false;
                 var person = new PersonDiscoveryJsonTypes.Person();
                 batch = new TableBatchOperation();
                 foreach (KeyValuePair<string, JToken> item in jPerson)
@@ -59,24 +71,42 @@ namespace MovieDBconnection
                         person[item.Key] = item.Value.ToString();
                     }
                     else if (item.Key.ToLower().Equals("known_for")) { }
-                    else person[item.Key] = item.Value.ToString();
+                    else
+                    {
+                        person.ETag = "*";
+                        person[item.Key] = item.Value.ToString();
+                    }
                 }
+
+                if (await _tableHandler.ExistInTableAsync(person.PartitionKey, person.RowKey)) { userInTable = true; }
 
                 if (batches.ContainsKey(batchPartition))
                 {
                     batch = batches[batchPartition];
-                    batch.InsertOrMerge(person);
+                    await InsertOrUpdateAsync(userInTable, person);
                 }
                 else
                 {
-                    batch.InsertOrMerge(person);
+                    await InsertOrUpdateAsync(userInTable, person);
                     batches.Add(batchPartition, batch);
                 }
             }
             foreach (KeyValuePair<string, TableBatchOperation> b in batches)
             {
-                table.ExecuteBatchAsync(b.Value);
+                if (b.Value.Count > 0) { 
+                await table.ExecuteBatchAsync(b.Value);
             }
         }
     }
+
+    private static async Task InsertOrUpdateAsync(bool presentInTable, Person person)
+    {
+        if (presentInTable)
+        {
+            if (await AZTableHandler.hasPersonUpdated(person))
+                batch.Merge(person);
+        }
+        else { batch.Insert(person); }
+    }
+}
 }

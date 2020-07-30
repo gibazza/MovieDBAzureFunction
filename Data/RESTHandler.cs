@@ -18,11 +18,6 @@ namespace MovieDBconnection
         private string _uriPage = "page={0}";
         private int _noOfPages = 0;
 
-        /*private string _uriMovieDiscovery = "discover/movie?";
-        private string _uriMovieObject = "movie/{0}?";
-        private string _uriMovieCreditsObject = "movie/{0}/credits?";
-        private string _uriPersonObject = "person/{0}?";*/
-
         public RESTHandler(string apiKey, string restBaseURI, string lang, string noPages = null, string proxyServer = null)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;

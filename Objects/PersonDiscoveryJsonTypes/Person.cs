@@ -6,11 +6,13 @@ using Newtonsoft.Json;
 using System.Collections;
 using System.Reflection;
 using Microsoft.WindowsAzure.Storage.Table;
+using System.Collections.Generic;
+using System.Linq;
 //using MovieDBconnection.MovieDiscoveryJsonTypes;
 
 namespace MovieDBconnection.PersonDiscoveryJsonTypes
 {
-    public class Person : TableEntity
+    public  class Person : TableEntity, IEnumerable, IEnumerator
     {
         public Person() { }
         public string popularity { get; set; }
@@ -19,6 +21,14 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
         public string known_for_department { get; set; }
         public string adult { get; set; }
         public string gender { get; set; }
+
+        /*public string PartitionKey { get; set; }
+        public string RowKey { get; set; }
+        public DateTimeOffset Timestamp { get; set; }
+        public string ETag { get; set; }*/
+
+        object IEnumerator.Current => throw new NotImplementedException();
+
         public object this[string propertyName]
         {
             set
@@ -26,6 +36,28 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
                 PropertyInfo pi = this.GetType().GetProperty(propertyName);
                 pi.SetValue(this, value, null);
             }
+        }
+        public IEnumerator GetEnumerator()
+        {        
+            Dictionary<string, dynamic> propDict = new Dictionary<string, dynamic>();
+            Type myType = typeof(Person);
+            PropertyInfo[] myProps = myType.GetProperties();
+            foreach (PropertyInfo myprop in myProps)
+            {
+                if (!myprop.Name.Equals("Item")) { 
+                    propDict.Add(myprop.Name, myprop.GetValue(this, null)); }
+            }
+            return propDict.GetEnumerator();
+        }
+
+        bool IEnumerator.MoveNext()
+        {
+            throw new NotImplementedException();
+        }
+
+        void IEnumerator.Reset()
+        {
+            throw new NotImplementedException();
         }
     }
 }

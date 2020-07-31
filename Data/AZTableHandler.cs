@@ -1,16 +1,10 @@
-using System;
-using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
 using MovieDBconnection.PersonDiscoveryJsonTypes;
 using System.Threading.Tasks;
-using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Extensions.Http;
-using Microsoft.AspNetCore.Http;
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Xml;
 using System.Collections.Generic;
-using Newtonsoft.Json.Linq;
 using System.Globalization;
+using System.Linq;
+using MovieDBconnection.MovieDiscoveryJsonTypes;
 
 namespace MovieDBconnection
 {
@@ -35,7 +29,7 @@ namespace MovieDBconnection
         public async Task<bool> ExistInTableAsync(string partitionKey, string rowKey)
         {
             bool rtnValue = false;
-            IList<DynamicTableEntity> resultList = await RunQuery(partitionKey, rowKey, 1);
+            IList<Person> resultList = await FilterQuery(partitionKey, rowKey, 1);
             int resultCount = resultList.Count;
             if (resultCount == 1) { rtnValue = true; }
             return rtnValue;
@@ -44,7 +38,8 @@ namespace MovieDBconnection
         public static async Task<bool> hasPersonUpdated(Person AZTablePerson)
         {
             bool rtnValue = false;
-            IList<DynamicTableEntity> resultList = await RunQuery(AZTablePerson.PartitionKey, AZTablePerson.RowKey, 1);
+
+            IList<Person> resultList = await FilterQuery(AZTablePerson.PartitionKey, AZTablePerson.RowKey, 1);
             foreach (KeyValuePair<string, dynamic> attribute in AZTablePerson)
             {
                 if (attribute.Key.ToLower() == "timestamp" ||
@@ -56,7 +51,7 @@ namespace MovieDBconnection
                         return true;
                     }
                 }
-                else if (attribute.Value != resultList[0].Properties[attribute.Key].StringValue)
+                else if (attribute.Value != resultList[0].GetType().GetProperty(attribute.Key).ToString())
                 {
                     return true;
                 }
@@ -64,12 +59,41 @@ namespace MovieDBconnection
             return rtnValue;
         }
 
-        private static async Task<IList<DynamicTableEntity>> RunQuery(string partitionKey, string rowKey, int top)
+        public async void UpdateRow(string partitionKey, string rowKey, string newMessage)
         {
-            IList<DynamicTableEntity> rntValue;
-            TableQuerySegment querySegment = null;
+            TableOperation retrieve = TableOperation.Retrieve<Person>(partitionKey, rowKey);
 
-            TableQuery query = new TableQuery().Where(
+            TableResult result = await _tableToQuery.ExecuteAsync(retrieve);
+
+            Person person = (Person)result.Result;
+
+            person.ETag = "*";
+            person.status = newMessage;
+
+            if (result != null)
+            {
+                TableOperation update = TableOperation.Replace(person);
+
+                await _tableToQuery.ExecuteAsync(update);
+            }
+
+        }
+
+        public async Task<Person> GetRowAsync(string partitionKey, string rowKey)
+        {
+            TableOperation retrieve = TableOperation.Retrieve<Person>(partitionKey, rowKey);
+            TableResult result = await _tableToQuery.ExecuteAsync(retrieve);
+            return (Person)result.Result;
+        }
+
+        public async Task<IList<Person>> AllRows()
+        {
+            return await RunQuery(new TableQuery<Person>());
+        }
+
+        public static async Task<IList<Person>> FilterQuery(string partitionKey, string rowKey, int top)
+        {
+            TableQuery<Person> query = new TableQuery<Person>().Where(
                 TableQuery.CombineFilters(
                     TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKey),
                         TableOperators.And,
@@ -77,12 +101,21 @@ namespace MovieDBconnection
                 ));
             query.Take(top);
 
+            
+            return await RunQuery(query);
+        }
+
+        private static async Task<IList<Person>> RunQuery(TableQuery<Person> query)
+        {
+            List<Person> rntValue;
+            TableQuerySegment<Person> querySegment = null;
             do
             {
                 querySegment = await _tableToQuery.ExecuteQuerySegmentedAsync(query, querySegment?.ContinuationToken);
-                rntValue = querySegment.Results;
+                rntValue = querySegment.Results.ToList();
             } while (querySegment.ContinuationToken != null);
             return rntValue;
         }
+
     }
 }

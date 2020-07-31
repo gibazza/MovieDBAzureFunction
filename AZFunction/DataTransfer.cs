@@ -7,6 +7,9 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
 using MovieDBconnection.PersonDiscoveryJsonTypes;
 using System.Threading.Tasks;
+using System.Linq;
+using System.Security.Cryptography.X509Certificates;
+using Newtonsoft.Json;
 
 namespace MovieDBconnection
 {
@@ -17,18 +20,18 @@ namespace MovieDBconnection
         private static List<dynamic> _personDiscoveryList;
         private const string PARTKEY = "name";
         private const string ROWKEY = "id";
+        private const string ACTIVESTATUS = "A";
+        private const string INACTIVESTATUS = "D";
 
         private static CloudStorageAccount storageAccount;
         private static CloudTableClient tableClient;
         private static CloudTable table;
 
         private static TableBatchOperation batch;
-        private static bool userInTable;
+        private static bool personInTable;
 
 
-        //TODO: need to determine from call to popular people if it is a:
-        //TODO: new person - insert
-        //TODO: update to existing person - update
+        //TODO: need to determine from api call to popular people if it is a:
         //TODO: person is no longer in pop people list but is in AS table - delete
 
         [FunctionName("GetMovieDBPopularPersons")]
@@ -53,9 +56,20 @@ namespace MovieDBconnection
             _peopleDiscovery = new RESTHandler(cpAPIKey, cpBaseUri, cpLang, cpLIMIT);
             _personDiscoveryList = _peopleDiscovery.ReadObjects();
 
+            //Mark as deleted people from the table if not popular person list
+            foreach (Person person in await _tableHandler.AllRows())
+            {
+                List<Person> moviePeople = _personDiscoveryList.ConvertAll<Person>(x => new Person(x));
+                if (!moviePeople.Exists(x => x.RowKey == person.RowKey))
+                {
+                    _tableHandler.UpdateRow(person.PartitionKey, person.RowKey, INACTIVESTATUS);
+                }
+            }
+
+            //Insert or Update people in the popular person list
             foreach (JObject jPerson in _personDiscoveryList)
             {
-                userInTable = false;
+                personInTable = false;
                 var person = new PersonDiscoveryJsonTypes.Person();
                 batch = new TableBatchOperation();
                 foreach (KeyValuePair<string, JToken> item in jPerson)
@@ -75,19 +89,20 @@ namespace MovieDBconnection
                     {
                         person.ETag = "*";
                         person[item.Key] = item.Value.ToString();
+                        person.status = ACTIVESTATUS;
                     }
                 }
 
-                if (await _tableHandler.ExistInTableAsync(person.PartitionKey, person.RowKey)) { userInTable = true; }
+                if (await _tableHandler.ExistInTableAsync(person.PartitionKey, person.RowKey)) { personInTable = true; }
 
                 if (batches.ContainsKey(batchPartition))
                 {
                     batch = batches[batchPartition];
-                    await InsertOrUpdateAsync(userInTable, person);
+                    await InsertOrUpdateAsync(personInTable, person);
                 }
                 else
                 {
-                    await InsertOrUpdateAsync(userInTable, person);
+                    await InsertOrUpdateAsync(personInTable, person);
                     batches.Add(batchPartition, batch);
                 }
             }

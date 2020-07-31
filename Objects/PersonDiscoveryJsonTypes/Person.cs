@@ -2,25 +2,40 @@
 // http://www.xamasoft.com/json-class-generator
 
 using System;
-using Newtonsoft.Json;
 using System.Collections;
 using System.Reflection;
 using Microsoft.WindowsAzure.Storage.Table;
 using System.Collections.Generic;
-using System.Linq;
 //using MovieDBconnection.MovieDiscoveryJsonTypes;
 
 namespace MovieDBconnection.PersonDiscoveryJsonTypes
 {
     public  class Person : TableEntity, IEnumerable, IEnumerator
     {
+
         public Person() { }
+
+        public Person(dynamic x)
+        {
+            //x = x.ToObject<Person>();
+            this.popularity = x.popularity.ToString();
+            this.profile_path = x.profile_path.ToString();
+            this.name = x.name.ToString();
+            this.known_for_department = x.known_for_department.ToString();
+            this.adult = x.adult.ToString();
+            this.gender = x.gender.ToString();
+            this.status = "A";
+            this.RowKey = x.id.ToString();
+            this.PartitionKey = x.name.ToString().Substring(0,1);
+        }
+
         public string popularity { get; set; }
         public string profile_path { get; set; }
         public string name { get; set; }
         public string known_for_department { get; set; }
         public string adult { get; set; }
         public string gender { get; set; }
+        public string status { get; set; }
 
         /*public string PartitionKey { get; set; }
         public string RowKey { get; set; }

@@ -7,9 +7,8 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
 using MovieDBconnection.PersonDiscoveryJsonTypes;
 using System.Threading.Tasks;
-using System.Linq;
-using System.Security.Cryptography.X509Certificates;
-using Newtonsoft.Json;
+
+//TODO: move anything using Microsoft.WindowsAzure.Storage to AZTableHandler class
 
 namespace MovieDBconnection
 {
@@ -30,14 +29,10 @@ namespace MovieDBconnection
         private static TableBatchOperation batch;
         private static bool personInTable;
 
-
-        //TODO: need to determine from api call to popular people if it is a:
-        //TODO: person is no longer in pop people list but is in AS table - delete
-
         [FunctionName("GetMovieDBPopularPersons")]
         public static async Task RunAsync([TimerTrigger("%timerSchedule%")] TimerInfo myTimer, ILogger log)
         {
-            log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
+            log.LogInformation(string.Format("{0}: C# Timer trigger function executed", DateTime.Now));
 
             var cpBaseUri = System.Environment.GetEnvironmentVariable("BaseURL", EnvironmentVariableTarget.Process);
             var cpAPIKey = System.Environment.GetEnvironmentVariable("MovieDBAPIKey", EnvironmentVariableTarget.Process);
@@ -56,13 +51,19 @@ namespace MovieDBconnection
             _peopleDiscovery = new RESTHandler(cpAPIKey, cpBaseUri, cpLang, cpLIMIT);
             _personDiscoveryList = _peopleDiscovery.ReadObjects();
 
+            log.LogInformation(string.Format("{0}: {1} people read from popular people MovieDB list", 
+                DateTime.Now, _personDiscoveryList.Count));
+
             //Mark as deleted people from the table if not popular person list
-            foreach (Person person in await _tableHandler.AllRows())
+            //TODO: Put these updates in a batch to be processed with all other changes
+            foreach (Person person in await _tableHandler.FilterByStatus(ACTIVESTATUS,-1))
             {
                 List<Person> moviePeople = _personDiscoveryList.ConvertAll<Person>(x => new Person(x));
                 if (!moviePeople.Exists(x => x.RowKey == person.RowKey))
                 {
                     _tableHandler.UpdateRow(person.PartitionKey, person.RowKey, INACTIVESTATUS);
+                    log.LogInformation(string.Format("{0}: Row ID: {1} {2} is now inactive",
+                        DateTime.Now, person.RowKey ,person.name));
                 }
             }
 

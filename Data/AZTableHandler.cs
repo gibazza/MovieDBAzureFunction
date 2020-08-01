@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using MovieDBconnection.MovieDiscoveryJsonTypes;
 
 namespace MovieDBconnection
 {
@@ -29,7 +28,7 @@ namespace MovieDBconnection
         public async Task<bool> ExistInTableAsync(string partitionKey, string rowKey)
         {
             bool rtnValue = false;
-            IList<Person> resultList = await FilterQuery(partitionKey, rowKey, 1);
+            IList<Person> resultList = await FilterByPartRowKey(partitionKey, rowKey, 1);
             int resultCount = resultList.Count;
             if (resultCount == 1) { rtnValue = true; }
             return rtnValue;
@@ -39,7 +38,7 @@ namespace MovieDBconnection
         {
             bool rtnValue = false;
 
-            IList<Person> resultList = await FilterQuery(AZTablePerson.PartitionKey, AZTablePerson.RowKey, 1);
+            IList<Person> resultList = await FilterByPartRowKey(AZTablePerson.PartitionKey, AZTablePerson.RowKey, 1);
             foreach (KeyValuePair<string, dynamic> attribute in AZTablePerson)
             {
                 if (attribute.Key.ToLower() == "timestamp" ||
@@ -79,7 +78,7 @@ namespace MovieDBconnection
 
         }
 
-        public async Task<Person> GetRowAsync(string partitionKey, string rowKey)
+        public async Task<Person> GetPerson(string partitionKey, string rowKey)
         {
             TableOperation retrieve = TableOperation.Retrieve<Person>(partitionKey, rowKey);
             TableResult result = await _tableToQuery.ExecuteAsync(retrieve);
@@ -91,7 +90,20 @@ namespace MovieDBconnection
             return await RunQuery(new TableQuery<Person>());
         }
 
-        public static async Task<IList<Person>> FilterQuery(string partitionKey, string rowKey, int top)
+        public async Task<IList<Person>> FilterByStatus(string status, int top)
+        {
+            TableQuery<Person> query = new TableQuery<Person>().Where(
+                    TableQuery.GenerateFilterCondition("status", QueryComparisons.Equal, status)
+                );
+            if (top > 0)
+            {
+                query.Take(top);
+            }
+
+            return await RunQuery(query);
+        }
+
+        public static async Task<IList<Person>> FilterByPartRowKey(string partitionKey, string rowKey, int top)
         {
             TableQuery<Person> query = new TableQuery<Person>().Where(
                 TableQuery.CombineFilters(
@@ -99,9 +111,12 @@ namespace MovieDBconnection
                         TableOperators.And,
                     TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.Equal, rowKey)
                 ));
-            query.Take(top);
+            if (top > 0)
+            {
+                query.Take(top);
+            }
 
-            
+
             return await RunQuery(query);
         }
 
@@ -116,6 +131,5 @@ namespace MovieDBconnection
             } while (querySegment.ContinuationToken != null);
             return rntValue;
         }
-
     }
 }

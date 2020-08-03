@@ -6,6 +6,7 @@ using System.Net;
 using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using LogicApp;
 
 namespace MovieDBconnection
 {
@@ -17,14 +18,12 @@ namespace MovieDBconnection
         private string _uriLanguage = "language={0}";
         private string _uriPage = "page={0}";
         private int _noOfPages = 0;
+        private static Trigger _jSONData;
 
-        public RESTHandler(string apiKey, string restBaseURI, string lang, string noPages = null, string proxyServer = null)
+        public RESTHandler( string restBaseURI, string apiKey = null, string lang = null, string noPages = null, string proxyServer = null)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-            if (!string.IsNullOrEmpty(noPages))
-            {
-                _noOfPages = Convert.ToInt32(noPages);
-            }
+            if (!string.IsNullOrEmpty(noPages)) {_noOfPages = Convert.ToInt32(noPages); }
             if (!String.IsNullOrEmpty(proxyServer) && proxyServer.Contains(":"))
             {
                 string[] proxyParts = proxyServer.Split(':');
@@ -37,13 +36,12 @@ namespace MovieDBconnection
                     WebRequest.DefaultWebProxy = new WebProxy(proxyParts[0], Convert.ToInt32(proxyParts[1]));
                 }
             }
-            _uriApiKey = string.Format(_uriApiKey, apiKey);
-            _uriLanguage = string.Format(_uriLanguage, lang);
+            if (!string.IsNullOrEmpty(apiKey)) { _uriApiKey = string.Format(_uriApiKey, apiKey); }
+            if (!string.IsNullOrEmpty(lang)) { _uriLanguage = string.Format(_uriLanguage, lang); }
             _baseURL = restBaseURI;
         }
         public List<dynamic> ReadObjects()
         {
-            string jsonRequestBody = string.Empty;
             Uri PopularPersonUri;
             Dictionary<string, string> attributes = new Dictionary<string, string>();
 
@@ -86,7 +84,7 @@ namespace MovieDBconnection
             }
             return rtnValue;
         }
-        public static KeyValuePair<HttpStatusCode, string> RESTReadObject(string URL, string jsonContentType, out string jsonResponse, string method)
+        public static KeyValuePair<HttpStatusCode, string> RESTReadObject(string URL, string jsonContentType, out string jsonResponse, string method, string postData = null)
         {
             KeyValuePair<HttpStatusCode, string> httpReturn;
             JToken responses;
@@ -95,6 +93,16 @@ namespace MovieDBconnection
             request.Method = method;
             request.Accept = jsonContentType;
             request.ContentType = jsonContentType;
+
+            if (postData != null )
+            {
+                byte[] byteArray = Encoding.UTF8.GetBytes(postData);
+                request.ContentLength = byteArray.Length;
+                Stream dataStream = request.GetRequestStream();
+                dataStream.Write(byteArray, 0, byteArray.Length);
+                dataStream.Close();
+            }
+
             httpReturn = _ParseResponse(request, out responses);
 
             if (responses != null)
@@ -151,6 +159,33 @@ namespace MovieDBconnection
                     throw ex;
             }
             return rtnValue;
+        }
+        public static string PostData(string postUrl, string date, string type, string partKey, string rowkey)
+        {
+            KeyValuePair<HttpStatusCode, string> postResponse;
+            string jsonResponseBody = string.Empty;
+            string errMessage = string.Empty;
+            string method = "post";
+            _jSONData = new Trigger{
+                executeDate = date,
+                executeType = type,
+                partitionKey = partKey,
+                rowKey = rowkey
+            };
+
+            string jsonPostData = JsonConvert.SerializeObject(_jSONData, Formatting.Indented);
+
+            postResponse = RESTReadObject(postUrl, "application/json", out jsonResponseBody, method, jsonPostData);
+            switch ((int)postResponse.Key)
+            {
+                case 200:
+                    return String.Format("{0} {1} succeeded with HTTP status code: {2}. Status message: {3}. Body: {4}", postUrl, method,
+                        (int)postResponse.Key, postResponse.Value.ToString(), string.IsNullOrEmpty(jsonResponseBody) ? "" : jsonResponseBody);
+                default:
+                    errMessage = String.Format("{0} {1} failed with HTTP status code: {2}. Status message: {3}. Body: {4}", postUrl, method,
+                        (int)postResponse.Key, postResponse.Value.ToString(), string.IsNullOrEmpty(jsonResponseBody) ? "" : jsonResponseBody);
+                    throw new Exception(errMessage);
+            }
         }
     }
 }

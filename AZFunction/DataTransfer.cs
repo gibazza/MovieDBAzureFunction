@@ -121,7 +121,7 @@ namespace MovieDBconnection
             {
                 if (b.Value.Count > 0)
                 {
-                    await table.ExecuteBatchAsync(b.Value);
+                    IList<TableResult> batchresult = await table.ExecuteBatchAsync(b.Value);
                     foreach (var operation in b.Value)
                     {
                         string operationType;
@@ -140,6 +140,8 @@ namespace MovieDBconnection
                             default:
                                 throw new Exception(string.Format("Unhandled operation type {0}", operation.OperationType.ToString()));
                         }
+
+                        _log.LogInformation(string.Format("{0}: {1} workflow has been initiated for Row ID: {2}",DateTime.Now, operationType, operation.Entity.RowKey));
                         RESTHandler.PostData(connLogicAppString,
                                     operationStartDateTime,
                                     operationType,

@@ -179,6 +179,7 @@ namespace MovieDBconnection
             switch ((int)postResponse.Key)
             {
                 case 200:
+                case 202:
                     return String.Format("{0} {1} succeeded with HTTP status code: {2}. Status message: {3}. Body: {4}", postUrl, method,
                         (int)postResponse.Key, postResponse.Value.ToString(), string.IsNullOrEmpty(jsonResponseBody) ? "" : jsonResponseBody);
                 default:

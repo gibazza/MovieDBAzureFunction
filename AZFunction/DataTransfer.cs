@@ -21,7 +21,7 @@ namespace MovieDBconnection
         private const string PARTKEY = "name";
         private const string ROWKEY = "id";
         private const string ACTIVESTATUS = "A";
-        private const string INACTIVESTATUS = "D";
+        private const string INACTIVESTATUS = "I";
 
         private static CloudStorageAccount storageAccount;
         private static CloudTableClient tableClient;

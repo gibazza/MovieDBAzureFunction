@@ -17,7 +17,6 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
 
         public Person(dynamic x)
         {
-            //x = x.ToObject<Person>();
             this.popularity = x.popularity.ToString();
             this.profile_path = x.profile_path.ToString();
             this.name = x.name.ToString();
@@ -27,6 +26,10 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
             this.status = "A";
             this.RowKey = x.id.ToString();
             this.PartitionKey = x.name.ToString().Substring(0,1);
+            if (!string.IsNullOrEmpty(x.upn))
+            {
+                this.upn = x.upn.ToString();
+            }
         }
 
         public string popularity { get; set; }
@@ -36,6 +39,7 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
         public string adult { get; set; }
         public string gender { get; set; }
         public string status { get; set; }
+        public string upn { get; set; }
 
         /*public string PartitionKey { get; set; }
         public string RowKey { get; set; }

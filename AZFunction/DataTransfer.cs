@@ -64,14 +64,25 @@ namespace MovieDBconnection
             _log.LogInformation(string.Format("{0}: {1} people read from popular people MovieDB list",
                 DateTime.Now, _personDiscoveryList.Count));
 
-            //Mark as deleted people from the table if not popular person list
-            //TODO: Put these updates in a batch to be processed with all other changes
             foreach (Person person in await _tableHandler.FilterByStatus(ACTIVESTATUS, -1))
             {
                 List<Person> moviePeople = _personDiscoveryList.ConvertAll<Person>(x => new Person(x));
                 if (!moviePeople.Exists(x => x.RowKey == person.RowKey))
                 {
-                    _tableHandler.UpdateRow(person.PartitionKey, person.RowKey, INACTIVESTATUS);
+                    batch = new TableBatchOperation();
+                    batchPartition = person.PartitionKey;
+                    person.status = INACTIVESTATUS;
+                    //_tableHandler.UpdateRow(person.PartitionKey, person.RowKey, INACTIVESTATUS);
+                    if (batches.ContainsKey(batchPartition))
+                    {
+                        batch = batches[batchPartition];
+                        await InsertOrUpdateAsync(true, person);
+                    }
+                    else
+                    {
+                        await InsertOrUpdateAsync(true, person);
+                        batches.Add(batchPartition, batch);
+                    }
                     _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is now inactive",
                         DateTime.Now, person.RowKey, person.name));
                 }
@@ -132,7 +143,7 @@ namespace MovieDBconnection
                                 break;
                             case TableOperationType.Merge:
                                 Person thisPerson = (Person)operation.Entity;
-                                if (string.Compare(thisPerson.status, ACTIVESTATUS, true, CultureInfo.InvariantCulture) == 1)
+                                if (string.Compare(thisPerson.status, ACTIVESTATUS, true, CultureInfo.InvariantCulture) == 0)
                                     operationType = "Update";
                                 else
                                     operationType = "Delete";

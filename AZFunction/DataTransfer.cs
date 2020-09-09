@@ -28,7 +28,7 @@ namespace MovieDBconnection
         private static CloudTable table;
 
         private static TableBatchOperation batch;
-        private static bool personInTable;
+        private static Dictionary<string, TableBatchOperation> batches;
 
         private static ILogger _log;
 
@@ -49,7 +49,7 @@ namespace MovieDBconnection
             var cpLang = System.Environment.GetEnvironmentVariable("Lang", EnvironmentVariableTarget.Process);
             var cpLIMIT = System.Environment.GetEnvironmentVariable("LimitRtnPages", EnvironmentVariableTarget.Process);
             
-            var batches = new Dictionary<string, TableBatchOperation>();
+            batches = new Dictionary<string, TableBatchOperation>();
             var batchPartition = string.Empty;
 
             storageAccount = CloudStorageAccount.Parse(connMovieDBString);
@@ -64,36 +64,35 @@ namespace MovieDBconnection
             _log.LogInformation(string.Format("{0}: {1} people read from popular people MovieDB list",
                 DateTime.Now, _personDiscoveryList.Count));
 
+            await FindActivePeopleToInactivate();
+
+            await InsertOrUpdatePeople();
+
+            await ProcessBatches();
+        }
+
+        private static async Task FindActivePeopleToInactivate()
+        {
             foreach (Person person in await _tableHandler.FilterByStatus(ACTIVESTATUS, -1))
             {
                 List<Person> moviePeople = _personDiscoveryList.ConvertAll<Person>(x => new Person(x));
                 if (!moviePeople.Exists(x => x.RowKey == person.RowKey))
                 {
-                    batch = new TableBatchOperation();
-                    batchPartition = person.PartitionKey;
                     person.status = INACTIVESTATUS;
-                    //_tableHandler.UpdateRow(person.PartitionKey, person.RowKey, INACTIVESTATUS);
-                    if (batches.ContainsKey(batchPartition))
-                    {
-                        batch = batches[batchPartition];
-                        await InsertOrUpdateAsync(true, person);
-                    }
-                    else
-                    {
-                        await InsertOrUpdateAsync(true, person);
-                        batches.Add(batchPartition, batch);
-                    }
+                    await AddtoBatches(person);
                     _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is now inactive",
                         DateTime.Now, person.RowKey, person.name));
                 }
             }
+        }
 
+        private static async Task InsertOrUpdatePeople()
+        {
             //Insert or Update people in the popular person list
             foreach (JObject jPerson in _personDiscoveryList)
             {
-                personInTable = false;
-                var person = new PersonDiscoveryJsonTypes.Person();
-                batch = new TableBatchOperation();
+                var person = new Person();
+
                 foreach (KeyValuePair<string, JToken> item in jPerson)
                 {
                     if (item.Key.ToLower().Equals(ROWKEY))
@@ -102,11 +101,14 @@ namespace MovieDBconnection
                     }
                     else if (item.Key.ToLower().Equals(PARTKEY))
                     {
-                        batchPartition = item.Value.ToString().Substring(0, 1);
-                        person.PartitionKey = batchPartition;
+                        //Adds partion key dirved from name and name to table
+                        person.PartitionKey = item.Value.ToString().Substring(0, 1);
                         person[item.Key] = item.Value.ToString();
                     }
-                    else if (item.Key.ToLower().Equals("known_for")) { }
+                    else if (item.Key.ToLower().Equals("known_for"))
+                    {
+                        //skips known_for
+                    }
                     else
                     {
                         person.ETag = "*";
@@ -115,19 +117,53 @@ namespace MovieDBconnection
                     }
                 }
 
-                if (await _tableHandler.ExistInTableAsync(person.PartitionKey, person.RowKey)) { personInTable = true; }
+                await AddtoBatches(person);
+            }
+        }
 
-                if (batches.ContainsKey(batchPartition))
+        private static async Task AddtoBatches(Person person)
+        {
+            string batchPartition = person.PartitionKey;
+            bool personInTable = false;
+            batch = new TableBatchOperation();
+
+            //Is this a new or exisitng person in the table
+            if (await _tableHandler.ExistInTableAsync(person.PartitionKey, person.RowKey)) { personInTable = true; }
+
+            //if the batch with partition key already exists in the batchs dictionary add this as another job to that batch with the same partionion key
+            if (batches.ContainsKey(batchPartition))
+            {
+                batch = batches[batchPartition];
+                await InsertOrUpdateAsync(personInTable, person);
+            }
+            //else the batch with partition key doesn't exist in the batchs dictionary add this as the first job to that batch with partionion key
+            else
+            {
+                await InsertOrUpdateAsync(personInTable, person);
+                batches.Add(batchPartition, batch);
+            }
+        }
+
+        private static async Task InsertOrUpdateAsync(bool presentInTable, Person person)
+        {
+            if (presentInTable)
+            {
+                if (await AZTableHandler.hasPersonUpdated(person))
                 {
-                    batch = batches[batchPartition];
-                    await InsertOrUpdateAsync(personInTable, person);
-                }
-                else
-                {
-                    await InsertOrUpdateAsync(personInTable, person);
-                    batches.Add(batchPartition, batch);
+                    batch.Merge(person);
+                    _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is updated",
+                        DateTime.Now, person.RowKey, person.name));
                 }
             }
+            else { 
+                batch.Insert(person);
+                _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is inserted",
+                        DateTime.Now, person.RowKey, person.name));
+            }
+        }
+
+        private static async Task ProcessBatches()
+        {
             foreach (KeyValuePair<string, TableBatchOperation> b in batches)
             {
                 if (b.Value.Count > 0)
@@ -152,7 +188,7 @@ namespace MovieDBconnection
                                 throw new Exception(string.Format("Unhandled operation type {0}", operation.OperationType.ToString()));
                         }
 
-                        _log.LogInformation(string.Format("{0}: {1} workflow has been initiated for Row ID: {2}",DateTime.Now, operationType, operation.Entity.RowKey));
+                        _log.LogInformation(string.Format("{0}: {1} workflow has been initiated for Row ID: {2}", DateTime.Now, operationType, operation.Entity.RowKey));
                         RESTHandler.PostData(connLogicAppString,
                                     operationStartDateTime,
                                     operationType,
@@ -160,24 +196,6 @@ namespace MovieDBconnection
                                     operation.Entity.RowKey);
                     }
                 }
-            }
-        }
-
-        private static async Task InsertOrUpdateAsync(bool presentInTable, Person person)
-        {
-            if (presentInTable)
-            {
-                if (await AZTableHandler.hasPersonUpdated(person))
-                {
-                    batch.Merge(person);
-                    _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is updated",
-                        DateTime.Now, person.RowKey, person.name));
-                }
-            }
-            else { 
-                batch.Insert(person);
-                _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is inserted",
-                        DateTime.Now, person.RowKey, person.name));
             }
         }
     }

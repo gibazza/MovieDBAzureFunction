@@ -10,7 +10,7 @@ using System.Collections.Generic;
 
 namespace MovieDBconnection.PersonDiscoveryJsonTypes
 {
-    public  class Person : TableEntity, IEnumerable, IEnumerator
+    public class Person : TableEntity, IEnumerable, IEnumerator
     {
 
         public Person() { }
@@ -25,7 +25,7 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
             this.gender = x.gender.ToString();
             this.status = "A";
             this.RowKey = x.id.ToString();
-            this.PartitionKey = x.name.ToString().Substring(0,1);
+            this.PartitionKey = x.name.ToString().Substring(0, 1);
             if (!string.IsNullOrEmpty(x.upn))
             {
                 this.upn = x.upn.ToString();
@@ -40,20 +40,11 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
         public string gender { get; set; }
         public string status { get; set; }
         public string upn { get; set; }
-        /*public string PartitionKey { get; set; }
-        public string RowKey { get; set; }
-        public DateTimeOffset Timestamp { get; set; }
-        public string ETag { get; set; }*/
 
         object IEnumerator.Current => throw new NotImplementedException();
 
         public object this[string propertyName]
         {
-            get
-            {
-                PropertyInfo pi = this.GetType().GetProperty(propertyName);
-                return pi.GetValue(this);
-            }
             set
             {
                 PropertyInfo pi = this.GetType().GetProperty(propertyName);
@@ -61,14 +52,16 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
             }
         }
         public IEnumerator GetEnumerator()
-        {        
+        {
             Dictionary<string, dynamic> propDict = new Dictionary<string, dynamic>();
             Type myType = typeof(Person);
             PropertyInfo[] myProps = myType.GetProperties();
             foreach (PropertyInfo myprop in myProps)
             {
-                if (!myprop.Name.Equals("Item")) { 
-                    propDict.Add(myprop.Name, myprop.GetValue(this, null)); }
+                if (!myprop.Name.Equals("Item"))
+                {
+                    propDict.Add(myprop.Name, myprop.GetValue(this, null));
+                }
             }
             return propDict.GetEnumerator();
         }

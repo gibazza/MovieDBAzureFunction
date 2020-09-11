@@ -109,7 +109,8 @@ namespace MovieDBconnection
                     {
                          if (!_arrtibutesToSkip.Contains(item.Key))
                         {
-                            if (string.Compare(person[item.Key].ToString(), item.Value.ToString(), true, CultureInfo.InvariantCulture) != 0)
+                            //TODO: Need to figure out how to handle inherited properties in the get properties operator in Person class
+                            if (string.Compare(person.GetType().GetProperty(item.Key).GetValue(person).ToString(), item.Value.ToString(), true, CultureInfo.InvariantCulture) != 0)
                             {
                                 personUpdated = true;
                                 person[item.Key] = item.Value.ToString();

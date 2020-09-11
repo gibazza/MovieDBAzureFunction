@@ -18,6 +18,7 @@ namespace MovieDBconnection
         private static AZTableHandler _tableHandler;
         private static RESTHandler _peopleDiscovery;
         private static List<dynamic> _personDiscoveryList;
+        private static List<string> _arrtibutesToSkip = new List<string>() { "known_for", "profile_path", "adult", "popularity", ROWKEY };
         private const string PARTKEY = "name";
         private const string ROWKEY = "id";
         private const string ACTIVESTATUS = "A";
@@ -42,15 +43,14 @@ namespace MovieDBconnection
             operationStartDateTime = DateTime.Now.ToString();
             _log = log;
             _log.LogInformation(string.Format("{0}: C# Timer trigger function executed", operationStartDateTime));
-            connMovieDBString = System.Environment.GetEnvironmentVariable("ASConnString", EnvironmentVariableTarget.Process);
-            connLogicAppString = System.Environment.GetEnvironmentVariable("LogicAppTriggerURL", EnvironmentVariableTarget.Process);
-            var cpBaseUri = System.Environment.GetEnvironmentVariable("BaseURL", EnvironmentVariableTarget.Process);
-            var cpAPIKey = System.Environment.GetEnvironmentVariable("MovieDBAPIKey", EnvironmentVariableTarget.Process);
-            var cpLang = System.Environment.GetEnvironmentVariable("Lang", EnvironmentVariableTarget.Process);
-            var cpLIMIT = System.Environment.GetEnvironmentVariable("LimitRtnPages", EnvironmentVariableTarget.Process);
-            
+            connMovieDBString = Environment.GetEnvironmentVariable("ASConnString", EnvironmentVariableTarget.Process);
+            connLogicAppString = Environment.GetEnvironmentVariable("LogicAppTriggerURL", EnvironmentVariableTarget.Process);
+            var cpBaseUri = Environment.GetEnvironmentVariable("BaseURL", EnvironmentVariableTarget.Process);
+            var cpAPIKey = Environment.GetEnvironmentVariable("MovieDBAPIKey", EnvironmentVariableTarget.Process);
+            var cpLang = Environment.GetEnvironmentVariable("Lang", EnvironmentVariableTarget.Process);
+            var cpLIMIT = Environment.GetEnvironmentVariable("LimitRtnPages", EnvironmentVariableTarget.Process);
+
             batches = new Dictionary<string, TableBatchOperation>();
-            var batchPartition = string.Empty;
 
             storageAccount = CloudStorageAccount.Parse(connMovieDBString);
             tableClient = storageAccount.CreateCloudTableClient();
@@ -79,7 +79,7 @@ namespace MovieDBconnection
                 if (!moviePeople.Exists(x => x.RowKey == person.RowKey))
                 {
                     person.status = INACTIVESTATUS;
-                    await AddtoBatches(person);
+                    AddtoBatchesAsync(person,true);
                     _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is now inactive",
                         DateTime.Now, person.RowKey, person.name));
                 }
@@ -88,74 +88,104 @@ namespace MovieDBconnection
 
         private static async Task InsertOrUpdatePeople()
         {
+            Person person;
+            bool personInTable = false;
             //Insert or Update people in the popular person list
             foreach (JObject jPerson in _personDiscoveryList)
             {
-                var person = new Person();
+                string RowKey = jPerson.Property(ROWKEY).Value.ToString();
+                string PartitionKey = jPerson.Property("name").Value.ToString().Substring(0, 1);
+                bool personUpdated = false;
 
-                foreach (KeyValuePair<string, JToken> item in jPerson)
+                //Is this a new or exisitng person in the table
+                if (await _tableHandler.ExistInTableAsync(PartitionKey, RowKey))
                 {
-                    if (item.Key.ToLower().Equals(ROWKEY))
+                    personInTable = true;
+                    //Get the persons entry from the table
+                    person = await _tableHandler.GetPerson(PartitionKey, RowKey);
+
+                    //It is potentially an update. Check if anything has actually changed form what is held in the table
+                    foreach (KeyValuePair<string, JToken> item in jPerson)
                     {
-                        person.RowKey = item.Value.ToString();
+                         if (!_arrtibutesToSkip.Contains(item.Key))
+                        {
+                            if (string.Compare(person[item.Key].ToString(), item.Value.ToString(), true, CultureInfo.InvariantCulture) != 0)
+                            {
+                                personUpdated = true;
+                                person[item.Key] = item.Value.ToString();
+                            }
+                        }
                     }
-                    else if (item.Key.ToLower().Equals(PARTKEY))
+                    person.ETag = "*";
+                }
+                else
+                {
+                    //A new person being added
+                    person = new Person();
+                    personUpdated = true;
+                    foreach (KeyValuePair<string, JToken> item in jPerson)
                     {
-                        //Adds partion key dirved from name and name to table
-                        person.PartitionKey = item.Value.ToString().Substring(0, 1);
-                        person[item.Key] = item.Value.ToString();
-                    }
-                    else if (item.Key.ToLower().Equals("known_for"))
-                    {
-                        //skips known_for
-                    }
-                    else
-                    {
-                        person.ETag = "*";
-                        person[item.Key] = item.Value.ToString();
-                        person.status = ACTIVESTATUS;
+                        if (item.Key.ToLower().Equals(ROWKEY))
+                        {
+                            person.RowKey = item.Value.ToString();
+                        }
+                        else if (item.Key.ToLower().Equals(PARTKEY))
+                        {
+                            //Adds partion key dirved from name and name to table
+                            person.PartitionKey = item.Value.ToString().Substring(0, 1);
+                            person[item.Key] = item.Value.ToString();
+                        }
+                        else if (item.Key.ToLower().Equals("known_for"))
+                        {
+                            //skips known_for
+                        }
+                        else
+                        {
+                            person.ETag = "*";
+                            person[item.Key] = item.Value.ToString();
+                            person.status = ACTIVESTATUS;
+                        }
                     }
                 }
-
-                await AddtoBatches(person);
+                if (personUpdated) { AddtoBatchesAsync(person, personInTable); }
             }
         }
 
-        private static async Task AddtoBatches(Person person)
+        private static void AddtoBatchesAsync(Person person, bool personInTable)
         {
             string batchPartition = person.PartitionKey;
-            bool personInTable = false;
             batch = new TableBatchOperation();
 
             //Is this a new or exisitng person in the table
-            if (await _tableHandler.ExistInTableAsync(person.PartitionKey, person.RowKey)) { personInTable = true; }
+            //if (await _tableHandler.ExistInTableAsync(person.PartitionKey, person.RowKey)) { personInTable = true; }
 
             //if the batch with partition key already exists in the batchs dictionary add this as another job to that batch with the same partionion key
             if (batches.ContainsKey(batchPartition))
             {
                 batch = batches[batchPartition];
-                await InsertOrUpdateAsync(personInTable, person);
+                InsertOrUpdate(personInTable, person);
             }
             //else the batch with partition key doesn't exist in the batchs dictionary add this as the first job to that batch with partionion key
             else
             {
-                await InsertOrUpdateAsync(personInTable, person);
+                InsertOrUpdate(personInTable, person);
                 batches.Add(batchPartition, batch);
             }
         }
 
-        private static async Task InsertOrUpdateAsync(bool presentInTable, Person person)
+        private static void InsertOrUpdate(bool presentInTable, Person person)
         {
             if (presentInTable)
             {
-                if (await AZTableHandler.hasPersonUpdated(person))
-                {
-                    batch.Merge(person);
-                    _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is updated",
-                        DateTime.Now, person.RowKey, person.name));
-                }
+                //if (await AZTableHandler.hasPersonUpdated(person))
+                //{
+                batch.Merge(person);
+                _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is updated",
+                    DateTime.Now, person.RowKey, person.name));
+                //}
             }
-            else { 
+            else
+            {
                 batch.Insert(person);
                 _log.LogInformation(string.Format("{0}: Row ID: {1} {2} is inserted",
                         DateTime.Now, person.RowKey, person.name));

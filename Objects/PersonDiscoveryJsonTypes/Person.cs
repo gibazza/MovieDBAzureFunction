@@ -40,7 +40,6 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
         public string gender { get; set; }
         public string status { get; set; }
         public string upn { get; set; }
-
         /*public string PartitionKey { get; set; }
         public string RowKey { get; set; }
         public DateTimeOffset Timestamp { get; set; }
@@ -50,6 +49,11 @@ namespace MovieDBconnection.PersonDiscoveryJsonTypes
 
         public object this[string propertyName]
         {
+            get
+            {
+                PropertyInfo pi = this.GetType().GetProperty(propertyName);
+                return pi.GetValue(this);
+            }
             set
             {
                 PropertyInfo pi = this.GetType().GetProperty(propertyName);

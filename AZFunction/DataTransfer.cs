@@ -89,13 +89,15 @@ namespace MovieDBconnection
         private static async Task InsertOrUpdatePeople()
         {
             Person person;
-            bool personInTable = false;
+            bool personInTable;
+            bool personUpdated;
             //Insert or Update people in the popular person list
             foreach (JObject jPerson in _personDiscoveryList)
             {
                 string RowKey = jPerson.Property(ROWKEY).Value.ToString();
                 string PartitionKey = jPerson.Property("name").Value.ToString().Substring(0, 1);
-                bool personUpdated = false;
+                personUpdated = false;
+                personInTable = false;
 
                 //Is this a new or exisitng person in the table
                 if (await _tableHandler.ExistInTableAsync(PartitionKey, RowKey))
@@ -117,7 +119,10 @@ namespace MovieDBconnection
                             }
                         }
                     }
-                    person.ETag = "*";
+                    if (person.status == INACTIVESTATUS)
+                    {
+                        personUpdated = true;
+                    }
                 }
                 else
                 {
@@ -142,12 +147,12 @@ namespace MovieDBconnection
                         }
                         else
                         {
-                            person.ETag = "*";
                             person[item.Key] = item.Value.ToString();
-                            person.status = ACTIVESTATUS;
                         }
                     }
                 }
+                person.status = ACTIVESTATUS;
+                person.ETag = "*";
                 if (personUpdated) { AddtoBatchesAsync(person, personInTable); }
             }
         }
